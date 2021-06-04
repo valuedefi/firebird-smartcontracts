@@ -14,7 +14,7 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    address public hope = address(0x0000000000000000000000000000000000000000);
+    address public hope = address(0xd78C475133731CD54daDCb430F7aAE4F03C1E660);
 
     mapping(address => bool) public authorities;
 
@@ -26,7 +26,7 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
     mapping(address => uint256) private _locks;
     mapping(address => uint256) private _released;
 
-    mapping(address => mapping(bytes32 => bool)) public lockedReceipt; // address => tx_hash
+    mapping(bytes32 => bool) public lockedReceipt; // tx_hash => claimed?
 
     event Lock(address indexed to, uint256 value);
     event UnLock(address indexed account, uint256 value);
@@ -89,9 +89,9 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
     function lock(address _account, uint256 _amount, bytes32 _tx) external override isAuthorised {
         require(_account != address(0), "ValueToHopeLocker: no lock to address(0)");
         require(_amount > 0, "ValueToHopeLocker: zero lock");
-        require(!lockedReceipt[_account][_tx], "ValueToHopeLocker: already locked");
+        require(!lockedReceipt[_tx], "ValueToHopeLocker: already locked");
 
-        lockedReceipt[_account][_tx] = true;
+        lockedReceipt[_tx] = true;
         _locks[_account] = _locks[_account].add(_amount);
         _totalLock = _totalLock.add(_amount);
         emit Lock(_account, _amount);
@@ -109,7 +109,11 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
         }
     }
 
-    function claimUnlocked() external override {
+    function unlock() external {
+        claimUnlocked();
+    }
+
+    function claimUnlocked() public override {
         claimUnlockedFor(msg.sender);
     }
 
