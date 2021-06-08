@@ -47,7 +47,7 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
     }
 
     function editLocker(uint256 startReleaseTime_, uint256 endReleaseTime_) external onlyOwner {
-        require(_startReleaseTime > block.number && startReleaseTime_ > block.number, "ValueToHopeLocker: late");
+        require(_totalLock == 0 || (_startReleaseTime > block.number && startReleaseTime_ > block.number), "ValueToHopeLocker: late");
         require(endReleaseTime_ > startReleaseTime_ && endReleaseTime_ <= startReleaseTime_.add(20 weeks), "ValueToHopeLocker: invalid _endReleaseTime");
         _startReleaseTime = startReleaseTime_;
         _endReleaseTime = endReleaseTime_;
