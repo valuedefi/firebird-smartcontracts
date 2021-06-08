@@ -3,7 +3,9 @@
 pragma solidity 0.6.12;
 
 interface IReferral {
-    function set(address from, address to) external;
+    function set(address _from, address _to) external;
 
-    function refOf(address to) external view returns (address);
+    function onHopeCommission(address _from, address _to, uint256 _hopeAmount) external;
+
+    function refOf(address _to) external view returns (address);
 }
