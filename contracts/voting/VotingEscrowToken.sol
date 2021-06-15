@@ -6,6 +6,7 @@ import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/ERC20.sol
 import "@openzeppelin/contracts-ethereum-package/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts-ethereum-package/contracts/access/Ownable.sol";
 
+import "../interfaces/ICappedMintableBurnableERC20.sol";
 import "../interfaces/IVotingEscrow.sol";
 
 contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscrow {
@@ -22,6 +23,7 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
 
     address public lockedToken;
     uint256 public minLockedAmount;
+    uint256 public earlyWithdrawFeeRate;
 
     struct LockedBalance {
         uint256 amount;
@@ -45,6 +47,7 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
         OwnableUpgradeSafe.__Ownable_init();
         lockedToken = _lockedToken;
         minLockedAmount = _minLockedAmount;
+        earlyWithdrawFeeRate = 5000; // 50%
         _unlocked = 1;
     }
 
@@ -52,7 +55,12 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
         minLockedAmount = _minLockedAmount;
     }
 
-    function burn(uint256 _amount) public {
+    function setEarlyWithdrawFeeRate(uint256 _earlyWithdrawFeeRate) external onlyOwner {
+        require(_earlyWithdrawFeeRate <= 5000, "too high"); // <= 50%
+        earlyWithdrawFeeRate = _earlyWithdrawFeeRate;
+    }
+
+    function burn(uint256 _amount) external {
         _burn(_msgSender(), _amount);
     }
 
@@ -131,6 +139,23 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
         require(_locked.amount > 0, "Nothing to withdraw");
         require(now >= _locked.end, "The lock didn't expire");
         uint256 _amount = _locked.amount;
+        _locked.end = 0;
+        _locked.amount = 0;
+        IERC20(lockedToken).safeTransfer(_msgSender(), _amount);
+
+        emit Withdraw(_msgSender(), _amount, now);
+    }
+
+    // This will charge PENALTY if lock is not expired yet
+    function emergencyWithdraw() external {
+        LockedBalance storage _locked = locked[_msgSender()];
+        require(_locked.amount > 0, "Nothing to withdraw");
+        uint256 _amount = _locked.amount;
+        if (now < _locked.end) {
+            uint256 _fee = _amount.mul(earlyWithdrawFeeRate).div(10000);
+            ICappedMintableBurnableERC20(lockedToken).burn(_fee);
+            _amount = _amount.sub(_fee);
+        }
         _locked.end = 0;
         _locked.amount = 0;
         IERC20(lockedToken).safeTransfer(_msgSender(), _amount);

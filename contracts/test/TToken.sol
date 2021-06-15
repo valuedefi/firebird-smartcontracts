@@ -100,10 +100,10 @@ contract TToken {
     }
 
     function burn(uint amt) public returns (bool) {
-        require(_balance[address(this)] >= amt, "!bal");
-        _balance[address(this)] = sub(_balance[address(this)], amt);
+        require(_balance[msg.sender] >= amt, "!bal");
+        _balance[msg.sender] = sub(_balance[msg.sender], amt);
         _totalSupply = sub(_totalSupply, amt);
-        emit Transfer(address(this), address(0), amt);
+        emit Transfer(msg.sender, address(0), amt);
         return true;
     }
 

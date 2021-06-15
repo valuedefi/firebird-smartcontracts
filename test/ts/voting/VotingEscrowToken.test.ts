@@ -15,10 +15,6 @@ import {
 const ONE_DAY_SECONDS = 24 * 3600;
 const INITIAL_AMOUNT = utils.parseEther('1000');
 
-const TX01 = '0xe8f9b445d4d2012878f4c410572d62cf781fc16a9111bb91e74a69501951bee1';
-const TX02 = '0xc1e52d478a803b2f5930d6e525cd89dea6713fd8f38c06dfd6ffcb52f0140d15';
-const TX03 = '0x898fae641c0c0dbf794677db973bb6c656f6530aa45365110cccc891ef27efe0';
-
 describe('VotingEscrowToken.test', () => {
     const {provider} = ethers;
 
@@ -61,6 +57,7 @@ describe('VotingEscrowToken.test', () => {
         it('should works correctly', async () => {
             expect(String(await votingToken.lockedToken())).to.eq(String(lockedToken.address));
             expect(String(await votingToken.minLockedAmount())).to.eq(toWei('10'));
+            expect(String(await votingToken.earlyWithdrawFeeRate())).to.eq('5000');
         });
 
         it('should fail if initialize twice', async () => {
@@ -162,10 +159,19 @@ describe('VotingEscrowToken.test', () => {
     });
 
     describe('#create_lock MAX 4 years', () => {
-        it('bob create_lock 10 TOKEN for MAX 4 years', async () => {
+        it('bob create_lock 100 TOKEN for MAX 4 years', async () => {
             await expect(async () => {
                 await votingToken.connect(bob).create_lock(toWei('100'), 4 * 360);
             }).to.changeTokenBalances(votingToken, [bob], [toWei('100')]);
+        });
+    });
+
+    describe('#emergencyWithdraw', () => {
+        it('bob emergencyWithdraw 100 TOKEN and get penalty of 50%', async () => {
+            await expect(async () => {
+                await votingToken.connect(bob).emergencyWithdraw();
+            }).to.changeTokenBalances(lockedToken, [bob, votingToken], [toWei('50'), toWei('-100')]);
+            expect(String(await lockedToken.balanceOf(votingToken.address))).to.eq(toWei('0'));
         });
     });
 });
