@@ -32,6 +32,9 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
 
     mapping(address => LockedBalance) public locked;
 
+    /* =================== Added variables (need to keep orders for proxy to work) =================== */
+    mapping(address => uint256) public mintedForLock;
+
     event Deposit(address indexed provider, uint256 value, uint256 locktime, uint256 timestamp);
     event Withdraw(address indexed provider, uint256 value, uint256 timestamp);
 
@@ -110,15 +113,17 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
             _vp = voting_power_unlock_time(_value, _end);
             _locked.amount = _amount.add(_value);
         } else {
-            require(_value == 0, "Cannot increase amount and extends lock in the same time");
+            require(_value == 0, "Cannot increase amount and extend lock in the same time");
             _vp = voting_power_locked_days(_amount, _days);
             _locked.end = _end.add(_days * 1 days);
+            require(_locked.end.sub(now) <= MAXTIME, "Cannot extend lock to more than 4 years");
         }
         require(_vp > 0, "No benefit to lock");
         if (_value > 0) {
             IERC20(lockedToken).safeTransferFrom(_msgSender(), address(this), _value);
         }
         _mint(_addr, _vp);
+        mintedForLock[_addr] = mintedForLock[_addr].add(_vp);
 
         emit Deposit(_addr, _locked.amount, _locked.end, now);
     }
@@ -134,20 +139,22 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
         _deposit_for(_msgSender(), 0, _days);
     }
 
-    function withdraw() external override {
+    function withdraw() external override lock {
         LockedBalance storage _locked = locked[_msgSender()];
         require(_locked.amount > 0, "Nothing to withdraw");
         require(now >= _locked.end, "The lock didn't expire");
         uint256 _amount = _locked.amount;
         _locked.end = 0;
         _locked.amount = 0;
+        _burn(_msgSender(), mintedForLock[_msgSender()]);
+        mintedForLock[_msgSender()] = 0;
         IERC20(lockedToken).safeTransfer(_msgSender(), _amount);
 
         emit Withdraw(_msgSender(), _amount, now);
     }
 
     // This will charge PENALTY if lock is not expired yet
-    function emergencyWithdraw() external {
+    function emergencyWithdraw() external lock {
         LockedBalance storage _locked = locked[_msgSender()];
         require(_locked.amount > 0, "Nothing to withdraw");
         uint256 _amount = _locked.amount;
@@ -158,6 +165,9 @@ contract VotingEscrowToken is ERC20UpgradeSafe, OwnableUpgradeSafe, IVotingEscro
         }
         _locked.end = 0;
         _locked.amount = 0;
+        _burn(_msgSender(), mintedForLock[_msgSender()]);
+        mintedForLock[_msgSender()] = 0;
+
         IERC20(lockedToken).safeTransfer(_msgSender(), _amount);
 
         emit Withdraw(_msgSender(), _amount, now);

@@ -25,6 +25,7 @@ describe('VotingEscrowToken.test', () => {
     let david: SignerWithAddress;
 
     before('provider & accounts setting', async () => {
+        // @ts-ignore
         [operator, admin, bob, carol, david] = await ethers.getSigners();
     });
 
@@ -149,8 +150,8 @@ describe('VotingEscrowToken.test', () => {
                 await votingToken.connect(bob).withdraw();
             }).to.changeTokenBalances(lockedToken, [bob, votingToken], [toWei('30'), toWei('-30')]);
             expect(String(await votingToken.locked__of(bob.address))).to.eq(toWei('0'));
-            expect(String(await votingToken.balanceOf(bob.address))).to.eq(toWei('0.729166184413580246'));
-            expect(String(await votingToken.totalSupply())).to.eq(toWei('0.729166184413580246'));
+            expect(String(await votingToken.balanceOf(bob.address))).to.eq(toWei('0')); // burn all
+            expect(String(await votingToken.totalSupply())).to.eq(toWei('0'));
         });
 
         it('should fail if withdraw again', async () => {
@@ -164,9 +165,19 @@ describe('VotingEscrowToken.test', () => {
                 await votingToken.connect(bob).create_lock(toWei('100'), 4 * 360);
             }).to.changeTokenBalances(votingToken, [bob], [toWei('100')]);
         });
+
+        it('should fail if extends for 7 more days', async () => {
+            await expect(votingToken.connect(bob).increase_unlock_time(7)).to.be.revertedWith('Cannot extend lock to more than 4 years');
+        });
     });
 
     describe('#emergencyWithdraw', () => {
+        it('should fail if bob does not have enough mHOPE to burn with', async () => {
+            await votingToken.connect(bob).transfer(carol.address, toWei('1'));
+            await expect(votingToken.connect(bob).emergencyWithdraw()).to.be.revertedWith('burn amount exceeds balance');
+            await votingToken.connect(carol).transfer(bob.address, toWei('1'));
+        });
+
         it('bob emergencyWithdraw 100 TOKEN and get penalty of 50%', async () => {
             await expect(async () => {
                 await votingToken.connect(bob).emergencyWithdraw();

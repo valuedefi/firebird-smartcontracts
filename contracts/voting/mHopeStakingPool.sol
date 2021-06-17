@@ -29,9 +29,9 @@ contract mHopeStakingPool is OwnableUpgradeSafe {
     }
 
     // Info of reward pool funding (usdc)
-    address public rewardToken = address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c); // USDC
-    uint256 public lastRewardTime;   // Last block number that rewardPool distribution occurs.
-    uint256 public rewardPerSecond;    // Reward token amount to distribute per block.
+    address public rewardToken = address(0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174); // USDC
+    uint256 public lastRewardTime; // Last block number that rewardPool distribution occurs.
+    uint256 public rewardPerSecond; // Reward token amount to distribute per block.
     uint256 public accRewardPerShare; // Accumulated rewardPool per share, times 1e18.
     uint256 public totalPaidRewards;
 
@@ -208,7 +208,6 @@ contract mHopeStakingPool is OwnableUpgradeSafe {
         if (_pendingReward > 0) {
             address _rewardToken = rewardToken;
             user.accumulatedEarned = user.accumulatedEarned.add(_pendingReward);
-            totalPaidRewards = totalPaidRewards.add(_pendingReward);
             user.rewardDebt = user.amount.mul(_accRewardPerShare).div(1e18);
             uint256 _paidAmount = user.reward.add(_pendingReward);
             // Safe reward transfer, just in case if rounding error causes pool to not have enough reward amount
@@ -217,6 +216,7 @@ contract mHopeStakingPool is OwnableUpgradeSafe {
                 user.reward = _paidAmount; // pending, dont claim yet
             } else {
                 user.reward = 0;
+                totalPaidRewards = totalPaidRewards.add(_paidAmount);
                 _safeTokenTransfer(_rewardToken, _account, _paidAmount);
                 emit RewardPaid(_rewardToken, _account, _paidAmount);
             }

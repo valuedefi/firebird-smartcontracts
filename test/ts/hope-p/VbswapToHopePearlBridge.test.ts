@@ -29,6 +29,7 @@ describe('VbswapToHopePearlBridge.test', () => {
     let david: SignerWithAddress;
 
     before('provider & accounts setting', async () => {
+        // @ts-ignore
         [operator, admin, bob, carol, david] = await ethers.getSigners();
     });
 

@@ -20,6 +20,7 @@ describe('HOPE.test', () => {
     let david: SignerWithAddress;
 
     before('provider & accounts setting', async () => {
+        // @ts-ignore
         [operator, bob, carol, david] = await ethers.getSigners();
     });
 
