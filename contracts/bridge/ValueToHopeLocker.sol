@@ -28,12 +28,23 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
 
     mapping(bytes32 => bool) public lockedReceipt; // tx_hash => claimed?
 
+    mapping(uint256 => mapping(address => bool)) private _status;
+
     event Lock(address indexed to, uint256 value);
     event UnLock(address indexed account, uint256 value);
     event EditLocker(uint256 indexed _startReleaseTime, uint256 _endReleaseTime);
 
     modifier isAuthorised() {
         require(authorities[msg.sender], "!authorised");
+        _;
+    }
+
+    modifier onlyOneBlock() {
+        require(!_status[block.number][tx.origin] && !_status[block.number][msg.sender], "ContractGuard: one block, one function");
+
+        _status[block.number][tx.origin] = true;
+        _status[block.number][msg.sender] = true;
+
         _;
     }
 
@@ -117,17 +128,17 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
         claimUnlockedFor(msg.sender);
     }
 
-    function claimUnlockedFor(address _account) public override {
+    function claimUnlockedFor(address _account) public override onlyOneBlock {
         require(now > _startReleaseTime, "ValueToHopeLocker: still locked");
         require(_locks[_account] > _released[_account], "ValueToHopeLocker: no locked");
 
         uint256 _amount = canUnlockAmount(_account);
-        ICappedMintableBurnableERC20(hope).mint(_account, _amount);
 
         _released[_account] = _released[_account].add(_amount);
         _totalReleased = _totalReleased.add(_amount);
         _totalLock = _totalLock.sub(_amount);
 
+        ICappedMintableBurnableERC20(hope).mint(_account, _amount);
         emit UnLock(_account, _amount);
     }
 

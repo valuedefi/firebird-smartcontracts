@@ -79,7 +79,7 @@ contract ERC777OwnableUpgradeSafe is Context, IERC777, IERC20 {
     // ERC20-allowances
     mapping (address => mapping (address => uint256)) private _allowances;
 
-    bool private __ERC1820_REGISTRY_ENABLED = false;
+    bool internal __ERC1820_REGISTRY_ENABLED = false;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 

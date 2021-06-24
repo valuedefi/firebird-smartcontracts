@@ -43,6 +43,10 @@ contract HOPE is ERC777OwnableUpgradeSafe {
         _isExcludedToFee[_msgSender()] = true;
     }
 
+    function setErc1820RegistryEnabled(bool _status) external onlyOwner {
+        __ERC1820_REGISTRY_ENABLED = _status;
+    }
+
     function setMinterCap(address _account, uint256 _minterCap) external onlyOwner {
         require(_account != address(0), "zero");
         minterCap[_account] = _minterCap;

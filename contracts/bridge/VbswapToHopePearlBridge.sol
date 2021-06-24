@@ -23,6 +23,8 @@ contract VbswapToHopePearlBridge is OwnableUpgradeSafe {
     uint256 public initialMigrationRate;
     uint256 public weeklyHalvingRate;
 
+    mapping(uint256 => mapping(address => bool)) private _status;
+
     event Migrate(address indexed account, uint256 vbswapAmount, uint256 pearlAmount);
 
     function initialize(address _vbswap, address _pearl, uint256 _startReleaseTime, uint256 _initialMigrationRate, uint256 _weeklyHalvingRate) public initializer {
@@ -32,6 +34,15 @@ contract VbswapToHopePearlBridge is OwnableUpgradeSafe {
         startReleaseTime = _startReleaseTime;
         initialMigrationRate = _initialMigrationRate;
         weeklyHalvingRate = _weeklyHalvingRate;
+    }
+
+    modifier onlyOneBlock() {
+        require(!_status[block.number][tx.origin] && !_status[block.number][msg.sender], "ContractGuard: one block, one function");
+
+        _;
+
+        _status[block.number][tx.origin] = true;
+        _status[block.number][msg.sender] = true;
     }
 
     function passedWeeks() public view returns (uint256) {
@@ -47,7 +58,7 @@ contract VbswapToHopePearlBridge is OwnableUpgradeSafe {
         return (initialMigrationRate <= _totalHalvingRate) ? 0 : initialMigrationRate.sub(_totalHalvingRate);
     }
 
-    function migrate(uint256 _vbswapAmount) external {
+    function migrate(uint256 _vbswapAmount) external onlyOneBlock {
         require(now >= startReleaseTime, "migration not opened yet");
         uint256 _rate = migrateRate();
         require(_rate > 0, "zero rate");
