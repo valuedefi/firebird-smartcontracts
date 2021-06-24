@@ -14,6 +14,7 @@ import "../interfaces/IUniswapV2Pair.sol";
 import "../interfaces/IValueLiquidRouter.sol";
 import "../interfaces/IValueLiquidFormula.sol";
 import "../interfaces/IValueLiquidPair.sol";
+import "../interfaces/IOneSwap.sol";
 import "../interfaces/IRewardPool.sol";
 
 interface IBurnabledERC20 {
@@ -65,6 +66,11 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
 
     mapping(address => uint256) public maxAmountToTrade; // HOPE, WETH, WMATIC, USDC
 
+    address public constant os3FBird = address(0x4a592De6899fF00fBC2c99d7af260B5E7F88D1B4);
+    address public constant os3FBirdSwap = address(0x01C9475dBD36e46d1961572C8DE24b74616Bae9e);
+    address public constant osIron3pool = address(0xC45c1087a6eF7A956af96B0fEED5a7c270f5C901);
+    address public constant osIron3poolSwap = address(0x563E49a74fd6AB193751f6C616ce7Cf900D678E5);
+
     /* =================== Added variables (need to keep orders for proxy to work) =================== */
     // ....
 
@@ -76,6 +82,8 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
     event CollectFeeFromProtocol(address[] pairs);
     event GetBackTokenFromProtocol(address token, uint256 amount);
     event ExecuteTransaction(address indexed target, uint256 value, string signature, bytes data);
+    event OneSwapRemoveLiquidity(uint256 amount);
+    event CollectOneSwapFees(uint256 timestampe);
 
     /* ========== Modifiers =============== */
 
@@ -251,6 +259,18 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
         emit CollectFeeFromProtocol(protocolFeePairsToRemove);
     }
 
+    function collectOneSwapFees() public checkPublicAllow {
+        IOneSwap(os3FBirdSwap).withdrawAdminFees();
+        IOneSwap(osIron3poolSwap).withdrawAdminFees();
+        uint256 _os3FBirdBal = IERC20(os3FBird).balanceOf(address(this));
+        if (_os3FBirdBal > 0) {
+            IERC20(os3FBird).safeIncreaseAllowance(os3FBirdSwap, _os3FBirdBal);
+            IOneSwap(osIron3poolSwap).removeLiquidityOneToken(_os3FBirdBal, 1, 1, now.add(60)); // USDC Index = 1
+            emit OneSwapRemoveLiquidity(_os3FBirdBal);
+        }
+        emit CollectOneSwapFees(now);
+    }
+
     function cashoutHopeToUsdc() public checkPublicAllow {
         uint256 _hopePrice = getHopeToUsdcPrice();
         if (_hopePrice >= hopePriceToSell) {
@@ -277,6 +297,7 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
 
     function workForReserveFund() external checkPublicAllow {
         collectFeeFromProtocol();
+        collectOneSwapFees();
         cashoutHopeToUsdc();
         sellTokensToUsdc();
     }
@@ -467,6 +488,10 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
     }
 
     /* ========== EMERGENCY ========== */
+
+    function renounceOwnership() public override onlyOwner {
+        revert("Dangerous");
+    }
 
     function executeTransaction(address target, uint256 value, string memory signature, bytes memory data) public onlyOwner returns (bytes memory) {
         bytes memory callData;
