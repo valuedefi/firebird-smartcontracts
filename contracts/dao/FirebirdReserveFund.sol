@@ -70,6 +70,8 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
     address public constant os3FBirdSwap = address(0x01C9475dBD36e46d1961572C8DE24b74616Bae9e);
     address public constant osIron3pool = address(0xC45c1087a6eF7A956af96B0fEED5a7c270f5C901);
     address public constant osIron3poolSwap = address(0x563E49a74fd6AB193751f6C616ce7Cf900D678E5);
+    address public constant dai = address(0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063);
+    address public constant usdt = address(0xc2132D05D31c914a87C6611C10748AEb04B58e8F);
 
     /* =================== Added variables (need to keep orders for proxy to work) =================== */
     // ....
@@ -262,11 +264,26 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
     function collectOneSwapFees() public checkPublicAllow {
         IOneSwap(os3FBirdSwap).withdrawAdminFees();
         IOneSwap(osIron3poolSwap).withdrawAdminFees();
+        uint8 _daiIndex = IOneSwap(os3FBirdSwap).getTokenIndex(dai);
+        uint8 _usdcIndex = IOneSwap(os3FBirdSwap).getTokenIndex(usdc);
+        uint8 _usdtIndex = IOneSwap(os3FBirdSwap).getTokenIndex(usdt);
         uint256 _os3FBirdBal = IERC20(os3FBird).balanceOf(address(this));
         if (_os3FBirdBal > 0) {
             IERC20(os3FBird).safeIncreaseAllowance(os3FBirdSwap, _os3FBirdBal);
-            IOneSwap(osIron3poolSwap).removeLiquidityOneToken(_os3FBirdBal, 1, 1, now.add(60)); // USDC Index = 1
+            IOneSwap(os3FBirdSwap).removeLiquidityOneToken(_os3FBirdBal, _usdcIndex, 1, now.add(60));
             emit OneSwapRemoveLiquidity(_os3FBirdBal);
+        }
+        uint256 _daiBal = IERC20(dai).balanceOf(address(this));
+        if (_daiBal > 0) {
+            IERC20(dai).safeIncreaseAllowance(os3FBirdSwap, _daiBal);
+            uint256 _outputAmount = IOneSwap(os3FBirdSwap).swap(_daiIndex, _usdcIndex, _daiBal, 1, now.add(60));
+            emit SwapToken(dai, usdc, _daiBal, _outputAmount);
+        }
+        uint256 _usdtBal = IERC20(usdt).balanceOf(address(this));
+        if (_usdtBal > 0) {
+            IERC20(usdt).safeIncreaseAllowance(os3FBirdSwap, _usdtBal);
+            uint256 _outputAmount = IOneSwap(os3FBirdSwap).swap(_usdtIndex, _usdcIndex, _usdtBal, 1, now.add(60));
+            emit SwapToken(usdt, usdc, _usdtBal, _outputAmount);
         }
         emit CollectOneSwapFees(now);
     }
@@ -422,7 +439,8 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
             _path[1] = _outputToken;
         }
         IERC20(_inputToken).safeIncreaseAllowance(address(quickswapRouter), _amount);
-        IUniswapV2Router(quickswapRouter).swapExactTokensForTokens(_amount, 1, _path, address(this), now.add(60));
+        uint256[] memory amountReceiveds = IUniswapV2Router(quickswapRouter).swapExactTokensForTokens(_amount, 1, _path, address(this), now.add(60));
+        emit SwapToken(_inputToken, _outputToken, _amount, amountReceiveds[amountReceiveds.length - 1]);
     }
 
     function _quickswapAddLiquidity(address _tokenA, address _tokenB, uint256 _amountADesired, uint256 _amountBDesired) internal {
