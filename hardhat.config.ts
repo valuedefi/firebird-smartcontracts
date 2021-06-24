@@ -67,6 +67,15 @@ const config: HardhatUserConfig = {
                         runs: 9999,
                     },
                 },
+            },
+            "contracts/dao/FirebirdReserveFund.sol": {
+                version: '0.6.12',
+                settings: {
+                    optimizer: {
+                        enabled: true,
+                        runs: 200,
+                    },
+                },
             }
         }
     },
