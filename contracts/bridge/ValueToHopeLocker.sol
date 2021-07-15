@@ -39,6 +39,17 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
         _;
     }
 
+    modifier notContract() {
+        uint256 size;
+        address addr = msg.sender;
+        assembly {
+            size := extcodesize(addr)
+        }
+        require(size == 0, "contract not allowed");
+        require(tx.origin == msg.sender, "contract not allowed");
+        _;
+    }
+
     modifier onlyOneBlock() {
         require(!_status[block.number][tx.origin] && !_status[block.number][msg.sender], "ContractGuard: one block, one function");
 
@@ -128,7 +139,7 @@ contract ValueToHopeLocker is OwnableUpgradeSafe, ITokenLocker {
         claimUnlockedFor(msg.sender);
     }
 
-    function claimUnlockedFor(address _account) public override onlyOneBlock {
+    function claimUnlockedFor(address _account) public override onlyOneBlock notContract {
         require(now > _startReleaseTime, "ValueToHopeLocker: still locked");
         require(_locks[_account] > _released[_account], "ValueToHopeLocker: no locked");
 
