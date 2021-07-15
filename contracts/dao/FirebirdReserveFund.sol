@@ -27,6 +27,10 @@ interface IProtocolFeeRemover {
     function remove(address[] calldata pairs) external;
 }
 
+interface ImHopeStakingPool {
+    function allocateMoreRewards(uint256 _addedReward, uint256 _days) external;
+}
+
 contract FirebirdReserveFund is OwnableUpgradeSafe {
     using SafeERC20 for IERC20;
     using SafeMath for uint256;
@@ -72,9 +76,15 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
     address public constant osIron3poolSwap = address(0x563E49a74fd6AB193751f6C616ce7Cf900D678E5);
     address public constant dai = address(0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063);
     address public constant usdt = address(0xc2132D05D31c914a87C6611C10748AEb04B58e8F);
+    address public constant iron = address(0xD86b5923F3AD7b585eD81B448170ae026c65ae9a);
+
+    address public constant mHopeStakingPool = address(0x0C80Da180F82B82c85939198d7f64bc4DC5Abb04);
 
     /* =================== Added variables (need to keep orders for proxy to work) =================== */
-    // ....
+    uint256 private _locked = 0;
+    address[] public pairWithOwner;
+    mapping(address => address) public projectOwner; // Pair -> Project owner wallet
+    mapping(address => uint256) public projectOwnerProfitShareRate; // 100 = 1%
 
     /* ========== EVENTS ========== */
 
@@ -82,6 +92,7 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
     event SwapToken(address inputToken, address outputToken, uint256 amount, uint256 amountReceived);
     event BurnToken(address token, uint256 amount);
     event CollectFeeFromProtocol(address[] pairs);
+    event CollectFeeAndShareProfitToOwner(address pair, address projectOwner, uint256 shareProfit, uint256 totalProfit);
     event GetBackTokenFromProtocol(address token, uint256 amount);
     event ExecuteTransaction(address indexed target, uint256 value, string signature, bytes data);
     event OneSwapRemoveLiquidity(uint256 amount);
@@ -95,8 +106,15 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
     }
 
     modifier checkPublicAllow() {
-        require(publicAllowed || strategist == msg.sender || owner() == msg.sender, "!operator nor !publicAllowed");
+        require(publicAllowed || strategist == msg.sender || owner() == msg.sender, "!authorised nor !publicAllowed");
         _;
+    }
+
+    modifier lock() {
+        require(_locked == 0, "LOCKED");
+        _locked = 1;
+        _;
+        _locked = 0;
     }
 
     /* ========== GOVERNANCE ========== */
@@ -173,7 +191,7 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
 
     function setFirebirdPathsToUsdcViaWmatic(address _inputToken, address _pairWithWmatic) external onlyOwner {
         delete firebirdPaths[_inputToken][usdc];
-        firebirdPaths[_inputToken][usdc] = [_pairWithWmatic, wethUsdcPair];
+        firebirdPaths[_inputToken][usdc] = [_pairWithWmatic, wmaticUsdcPair];
     }
 
     function setProtocolFeeRemover(IProtocolFeeRemover _protocolFeeRemover) external onlyOwner {
@@ -208,23 +226,28 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
         toCashoutTokenList.push(_token);
     }
 
-    function removeTokenToCashout(address _token) external onlyOwner returns (bool) {
-        uint256 _length = toCashoutTokenList.length;
-        for (uint256 i = 0; i < _length; i++) {
-            if (toCashoutTokenList[i] == _token) {
-                if (i < _length - 1) {
-                    toCashoutTokenList[i] = toCashoutTokenList[_length - 1];
-                }
-                delete toCashoutTokenList[_length - 1];
-                toCashoutTokenList.pop();
-                return true;
-            }
-        }
-        revert("not found");
-    }
+//    function removeTokenToCashout(address _token) external onlyOwner returns (bool) {
+//        uint256 _length = toCashoutTokenList.length;
+//        for (uint256 i = 0; i < _length; i++) {
+//            if (toCashoutTokenList[i] == _token) {
+//                if (i < _length - 1) {
+//                    toCashoutTokenList[i] = toCashoutTokenList[_length - 1];
+//                }
+//                delete toCashoutTokenList[_length - 1];
+//                toCashoutTokenList.pop();
+//                return true;
+//            }
+//        }
+//        revert("not found");
+//    }
 
     function grantFund(address _token, uint256 _amount, address _to) external onlyOwner {
         IERC20(_token).transfer(_to, _amount);
+    }
+
+    function allocateUsdcRewardsToStakingPool(uint256 _addedReward, uint256 _days) external onlyOwner {
+        IERC20(usdc).safeIncreaseAllowance(mHopeStakingPool, _addedReward);
+        ImHopeStakingPool(mHopeStakingPool).allocateMoreRewards(_addedReward, _days);
     }
 
     function setMaxAmountToTrade(address _token, uint256 _amount) external onlyStrategist {
@@ -236,7 +259,50 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
         hopePriceToSell = _hopePriceToSell;
     }
 
+    function setPairProjectOwnerProfitSharing(address _pair, address _projectOwner, uint256 _shareRate) public onlyOwner {
+        require(_shareRate <= 10000, "over 100%");
+        projectOwner[_pair] = _projectOwner;
+        projectOwnerProfitShareRate[_pair] = _shareRate;
+    }
+
+    function addPairWithOwner(address _pair, address _projectOwner, uint256 _shareRate) external onlyOwner {
+        uint256 _length = pairWithOwner.length;
+        for (uint256 i = 0; i < _length; i++) {
+            require(pairWithOwner[i] != address(_pair), "duplicated token");
+        }
+        pairWithOwner.push(_pair);
+        setPairProjectOwnerProfitSharing(_pair, _projectOwner, _shareRate);
+    }
+
+    function removePairWithOwner(address _pair) external onlyOwner returns (bool) {
+        uint256 _length = pairWithOwner.length;
+        for (uint256 i = 0; i < _length; i++) {
+            if (pairWithOwner[i] == _pair) {
+                if (i < _length - 1) {
+                    pairWithOwner[i] = pairWithOwner[_length - 1];
+                }
+                delete pairWithOwner[_length - 1];
+                pairWithOwner.pop();
+                setPairProjectOwnerProfitSharing(_pair, address(0), 0);
+                return true;
+            }
+        }
+        revert("not found");
+    }
+
     /* ========== VIEW FUNCTIONS ========== */
+
+    function protocolFeePairsToRemoveLength() external view returns (uint256) {
+        return protocolFeePairsToRemove.length;
+    }
+
+    function toCashoutTokenListLength() external view returns (uint256) {
+        return toCashoutTokenList.length;
+    }
+
+    function pairWithOwnerLength() external view returns (uint256) {
+        return pairWithOwner.length;
+    }
 
     function tokenBalances() public view returns (uint256 _hopeBal, uint256 _wethBal, uint256 _wmaticBal, uint256 _usdcBal) {
         _hopeBal = IERC20(hope).balanceOf(address(this));
@@ -256,8 +322,33 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
 
     /* ========== MUTATIVE FUNCTIONS ========== */
 
+    function collectFeeAndShareProfitToOwner(address _pair) public lock {
+        address _projectOwner = projectOwner[_pair];
+        uint256 _shareRate = projectOwnerProfitShareRate[_pair];
+        if (_projectOwner != address(0) && _shareRate > 0) {
+            require(publicAllowed || _projectOwner == msg.sender || strategist == msg.sender || owner() == msg.sender, "!authorised nor !publicAllowed");
+            address _protocolFeeRemover = address(protocolFeeRemover);
+            uint256 _pairBal = IERC20(_pair).balanceOf(_protocolFeeRemover);
+            if (_pairBal > 0) {
+                uint256 _shareProfit = _pairBal.mul(_shareRate).div(10000);
+                uint256 _before = IERC20(_pair).balanceOf(address(this));
+                IProtocolFeeRemover(_protocolFeeRemover).transfer(_pair, _shareProfit);
+                uint256 _after = IERC20(_pair).balanceOf(address(this));
+                IERC20(_pair).safeTransfer(_projectOwner, _after.sub(_before));
+                emit CollectFeeAndShareProfitToOwner(_pair, _projectOwner, _shareProfit, _pairBal);
+            }
+            address[] memory _pairs = new address[](1);
+            _pairs[0] = _pair;
+            IProtocolFeeRemover(_protocolFeeRemover).remove(_pairs);
+        }
+    }
+
     function collectFeeFromProtocol() public checkPublicAllow {
-        IProtocolFeeRemover(protocolFeeRemover).remove(protocolFeePairsToRemove);
+        uint256 _length = pairWithOwner.length;
+        for (uint256 i = 0; i < _length; i++) {
+            collectFeeAndShareProfitToOwner(pairWithOwner[i]);
+        }
+        protocolFeeRemover.remove(protocolFeePairsToRemove);
         emit CollectFeeFromProtocol(protocolFeePairsToRemove);
     }
 
@@ -267,6 +358,13 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
         uint8 _daiIndex = IOneSwap(os3FBirdSwap).getTokenIndex(dai);
         uint8 _usdcIndex = IOneSwap(os3FBirdSwap).getTokenIndex(usdc);
         uint8 _usdtIndex = IOneSwap(os3FBirdSwap).getTokenIndex(usdt);
+        uint256 _ironBal = IERC20(iron).balanceOf(address(this));
+        if (_ironBal > 0) {
+            // IERC20(iron).safeIncreaseAllowance(osIron3poolSwap, _ironBal);
+            // uint256 _outputAmount = IOneSwap(osIron3poolSwap).swap(1, 0, _ironBal, 1, now.add(60)); // IRON (1) -> 3FBIRD (0)
+            // emit SwapToken(iron, os3FBird, _ironBal, _outputAmount);
+            _quickswapSwapToken(new address[](0), iron, usdc, _ironBal);
+        }
         uint256 _os3FBirdBal = IERC20(os3FBird).balanceOf(address(this));
         if (_os3FBirdBal > 0) {
             IERC20(os3FBird).safeIncreaseAllowance(os3FBirdSwap, _os3FBirdBal);
@@ -353,17 +451,17 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
 //        _quickswapSwapToken(quickswapPaths[_inputToken][_outputToken], _inputToken, _outputToken, _amount);
 //    }
 
-    function quickswapAddLiquidity(address _tokenA, address _tokenB, uint256 _amountADesired, uint256 _amountBDesired) external onlyStrategist {
-        _quickswapAddLiquidity(_tokenA, _tokenB, _amountADesired, _amountBDesired);
-    }
+//    function quickswapAddLiquidity(address _tokenA, address _tokenB, uint256 _amountADesired, uint256 _amountBDesired) external onlyStrategist {
+//        _quickswapAddLiquidity(_tokenA, _tokenB, _amountADesired, _amountBDesired);
+//    }
 
 //    function quickswapAddLiquidityMax(address _tokenA, address _tokenB) external onlyStrategist {
 //        _quickswapAddLiquidity(_tokenA, _tokenB, IERC20(_tokenA).balanceOf(address(this)), IERC20(_tokenB).balanceOf(address(this)));
 //    }
 
-    function quickswapRemoveLiquidity(address _pair, uint256 _liquidity) external onlyStrategist {
-        _quickswapRemoveLiquidity(_pair, _liquidity);
-    }
+//    function quickswapRemoveLiquidity(address _pair, uint256 _liquidity) external onlyStrategist {
+//        _quickswapRemoveLiquidity(_pair, _liquidity);
+//    }
 
 //    function quickswapRemoveLiquidityMax(address _pair) external onlyStrategist {
 //        _quickswapRemoveLiquidity(_pair, IERC20(_pair).balanceOf(address(this)));
@@ -377,19 +475,19 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
         _firebirdAddLiquidity(_pair, _amountADesired, _amountBDesired);
     }
 
-    function firebirdAddLiquidityMax(address _pair) external onlyStrategist {
-        address _tokenA = IValueLiquidPair(_pair).token0();
-        address _tokenB = IValueLiquidPair(_pair).token1();
-        _firebirdAddLiquidity(_pair, IERC20(_tokenA).balanceOf(address(this)), IERC20(_tokenB).balanceOf(address(this)));
-    }
+//    function firebirdAddLiquidityMax(address _pair) external onlyStrategist {
+//        address _tokenA = IValueLiquidPair(_pair).token0();
+//        address _tokenB = IValueLiquidPair(_pair).token1();
+//        _firebirdAddLiquidity(_pair, IERC20(_tokenA).balanceOf(address(this)), IERC20(_tokenB).balanceOf(address(this)));
+//    }
 
     function firebirdRemoveLiquidity(address _pair, uint256 _liquidity) external onlyStrategist {
         _firebirdRemoveLiquidity(_pair, _liquidity);
     }
 
-    function firebirdRemoveLiquidityMax(address _pair) external onlyStrategist {
-        _firebirdRemoveLiquidity(_pair, IERC20(_pair).balanceOf(address(this)));
-    }
+//    function firebirdRemoveLiquidityMax(address _pair) external onlyStrategist {
+//        _firebirdRemoveLiquidity(_pair, IERC20(_pair).balanceOf(address(this)));
+//    }
 
     /* ========== FARMING ========== */
 
@@ -398,20 +496,20 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
         IRewardPool(_pool).deposit(_pid, _lpAmount);
     }
 
-    function depositToPoolMax(address _pool, uint256 _pid, address _lpAdd) external onlyStrategist {
-        uint256 _bal = IERC20(_lpAdd).balanceOf(address(this));
-        require(_bal > 0, "no lp");
-        depositToPool(_pool, _pid, _lpAdd, _bal);
-    }
+//    function depositToPoolMax(address _pool, uint256 _pid, address _lpAdd) external onlyStrategist {
+//        uint256 _bal = IERC20(_lpAdd).balanceOf(address(this));
+//        require(_bal > 0, "no lp");
+//        depositToPool(_pool, _pid, _lpAdd, _bal);
+//    }
 
     function withdrawFromPool(address _pool, uint256 _pid, uint256 _lpAmount) public onlyStrategist {
         IRewardPool(_pool).withdraw(_pid, _lpAmount);
     }
 
-    function withdrawFromPoolMax(address _pool, uint256 _pid) external onlyStrategist {
-        uint256 _stakedAmount = stakeAmountFromPool(_pool, _pid);
-        withdrawFromPool(_pool, _pid, _stakedAmount);
-    }
+//    function withdrawFromPoolMax(address _pool, uint256 _pid) external onlyStrategist {
+//        uint256 _stakedAmount = stakeAmountFromPool(_pool, _pid);
+//        withdrawFromPool(_pool, _pid, _stakedAmount);
+//    }
 
     function claimFromPool(address _pool, uint256 _pid) public checkPublicAllow {
         IRewardPool(_pool).withdraw(_pid, 0);
@@ -443,18 +541,18 @@ contract FirebirdReserveFund is OwnableUpgradeSafe {
         emit SwapToken(_inputToken, _outputToken, _amount, amountReceiveds[amountReceiveds.length - 1]);
     }
 
-    function _quickswapAddLiquidity(address _tokenA, address _tokenB, uint256 _amountADesired, uint256 _amountBDesired) internal {
-        IERC20(_tokenA).safeIncreaseAllowance(address(quickswapRouter), _amountADesired);
-        IERC20(_tokenB).safeIncreaseAllowance(address(quickswapRouter), _amountBDesired);
-        IUniswapV2Router(quickswapRouter).addLiquidity(_tokenA, _tokenB, _amountADesired, _amountBDesired, 1, 1, address(this), now.add(60));
-    }
+//    function _quickswapAddLiquidity(address _tokenA, address _tokenB, uint256 _amountADesired, uint256 _amountBDesired) internal {
+//        IERC20(_tokenA).safeIncreaseAllowance(address(quickswapRouter), _amountADesired);
+//        IERC20(_tokenB).safeIncreaseAllowance(address(quickswapRouter), _amountBDesired);
+//        IUniswapV2Router(quickswapRouter).addLiquidity(_tokenA, _tokenB, _amountADesired, _amountBDesired, 1, 1, address(this), now.add(60));
+//    }
 
-    function _quickswapRemoveLiquidity(address _pair, uint256 _liquidity) internal {
-        address _tokenA = IUniswapV2Pair(_pair).token0();
-        address _tokenB = IUniswapV2Pair(_pair).token1();
-        IERC20(_pair).safeIncreaseAllowance(address(quickswapRouter), _liquidity);
-        IUniswapV2Router(quickswapRouter).removeLiquidity(_tokenA, _tokenB, _liquidity, 1, 1, address(this), now.add(60));
-    }
+//    function _quickswapRemoveLiquidity(address _pair, uint256 _liquidity) internal {
+//        address _tokenA = IUniswapV2Pair(_pair).token0();
+//        address _tokenB = IUniswapV2Pair(_pair).token1();
+//        IERC20(_pair).safeIncreaseAllowance(address(quickswapRouter), _liquidity);
+//        IUniswapV2Router(quickswapRouter).removeLiquidity(_tokenA, _tokenB, _liquidity, 1, 1, address(this), now.add(60));
+//    }
 
     function _firebirdSwapToken(address _inputToken, address _outputToken, uint256 _amount) internal {
         if (_amount == 0) return;
